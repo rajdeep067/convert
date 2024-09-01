@@ -16,13 +16,15 @@ rl.question('Would you like to use a video URL or a local MP4 file? (Enter "url"
     if (choice.toLowerCase() === 'url') {
         // If user chooses URL
         rl.question('Please enter the video URL: ', (url) => {
-            downloadAndConvertVideo(url);
+            listAndSelectVideo(url);
         });
     } else if (choice.toLowerCase() === 'mp4') {
         // If user chooses local MP4 file
         rl.question('Please enter the path to the MP4 video on your local system: ', (pathToFile) => {
             if (fs.existsSync(pathToFile) && path.extname(pathToFile) === '.mp4') {
-                convertVideoToAudio(pathToFile);
+                rl.question('Please assign a name to the output MP3 file (without extension): ', (outputName) => {
+                    convertVideoToAudio(pathToFile, outputName);
+                });
             } else {
                 console.log('Invalid file path. Please ensure the file exists and is an MP4.');
                 rl.close();
@@ -34,43 +36,60 @@ rl.question('Would you like to use a video URL or a local MP4 file? (Enter "url"
     }
 });
 
-function downloadAndConvertVideo(url) {
+function listAndSelectVideo(url) {
+    console.log('Fetching video details...');
+    exec(`yt-dlp -F ${url}`, (err, stdout, stderr) => {
+        if (err) {
+            console.error('Error fetching video details:', err.message);
+            rl.close();
+            return;
+        }
+
+        // Extract video formats and sizes
+        const lines = stdout.split('\n');
+        const videos = lines.filter(line => line.includes('mp4') || line.includes('webm'));
+        if (videos.length === 0) {
+            console.log('No video formats found.');
+            rl.close();
+            return;
+        }
+
+        // Display video options
+        console.log('Available videos:');
+        videos.forEach((line, index) => {
+            console.log(`${index + 1}: ${line}`);
+        });
+
+        // Ask user to select a video
+        rl.question('Enter the number of the video you want to download: ', (choice) => {
+            const index = parseInt(choice) - 1;
+            if (index >= 0 && index < videos.length) {
+                const selectedFormat = videos[index].split(' ')[0].trim();
+                downloadAndConvertVideo(url, selectedFormat);
+            } else {
+                console.log('Invalid choice.');
+                rl.close();
+            }
+        });
+    });
+}
+
+function downloadAndConvertVideo(url, format) {
     rl.question('Please assign a name to the output MP3 file (without extension): ', (outputName) => {
         const outputPath = `${outputName}.mp3`;
         const tempVideoPath = 'temp_video.mp4';
         const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
 
-        console.log('Listing available formats...');
-        exec(`yt-dlp --list-formats ${url}`, (err, stdout, stderr) => {
+        console.log('Downloading video with format:', format);
+        exec(`yt-dlp -f ${format} -o ${tempVideoPath} ${url}`, (err, stdout, stderr) => {
             if (err) {
-                console.error('Error listing formats:', err.message);
+                console.error('Error during video download:', err.message);
                 rl.close();
                 return;
             }
 
-            // Extracting format code from the output
-            const formats = stdout.split('\n').filter(line => line.includes('mp4'));
-            const formatLine = formats[0]; // Choose the first available format line
-            if (!formatLine) {
-                console.error('No suitable format found.');
-                rl.close();
-                return;
-            }
-
-            // Extract the format code (e.g., hls-380)
-            const formatCode = formatLine.split(' ')[0].trim();
-
-            console.log('Downloading video with format:', formatCode);
-            exec(`yt-dlp -f ${formatCode} -o ${tempVideoPath} ${url}`, (err, stdout, stderr) => {
-                if (err) {
-                    console.error('Error during video download:', err.message);
-                    rl.close();
-                    return;
-                }
-
-                console.log('Converting video to audio...');
-                convertVideoToAudio(tempVideoPath, outputName, outputPath);
-            });
+            console.log('Converting video to audio...');
+            convertVideoToAudio(tempVideoPath, outputName);
         });
     });
 }
